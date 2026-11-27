@@ -35,7 +35,7 @@ Corte reproducible del caso ficticio: **27/11/2026**. El enunciado MAN040-B fija
 
 Se ejecutó `python -m pytest -q`: **48 pruebas aprobadas**. Las pruebas incluyen dominios de presión, límites de diámetro, fabricación gobernada por la prueba hidráulica, incertidumbre, fecha de corte, pérdida de comparabilidad, referencias cruzadas, prioridad inmediata y efecto de las consecuencias.
 
-`tests/browser.cjs` usa Playwright con Edge en una sesión aislada. Abre el panel, introduce una UT, comprueba los cambios de tasa, vida, condición, fecha y Df, cambia presión, temperatura y nivel, duplica el área de consecuencia y compara el proyecto completo tras descargar, restaurar, importar y recargar. El recorrido se ejecutó correctamente con el servidor local. Para repetirlo con Playwright instalado: `node tests/browser.cjs URL`.
+`tests/browser.cjs` usa Playwright con Edge en una sesión aislada. Abre el panel, introduce una UT, comprueba los cambios de tasa, vida, condición, fecha y Df, cambia presión, temperatura y nivel, duplica el área de consecuencia y compara el proyecto completo tras descargar, restaurar, importar y recargar. El recorrido aprobó con el servidor local y también con PyScript en el sitio público de GitHub Pages, con Edge en un perfil aislado. Ambas pruebas cubrieron adjuntos y relaciones. El despliegue de la revisión f6e465a concluyó con éxito y el PDF descargado de Pages coincidió byte por byte con el PDF entregado (SHA-256 4425430e17c7dad9f8ac3432f81ef8fcf53cc597f1b8c810b41fd5259bb4f1b2). Para repetirlo con Playwright instalado: `node tests/browser.cjs URL`.
 
 ## Modificaciones
 

@@ -38,9 +38,9 @@ const fs=require("node:fs/promises");
     await go("#/proyecto");
     const backup=await read();const download=page.waitForEvent("download");await page.locator("#pr-export").click();
     const file=await (await download).path();assert.deepEqual(JSON.parse(await fs.readFile(file,"utf8")),backup);
-    await page.locator("#pr-reset").click();await page.waitForURL("**/#/panel");assert.notDeepEqual(await read(),backup);
+    await page.locator("#pr-reset").click();await page.waitForURL(u=>u.hash==="#/panel");assert.notDeepEqual(await read(),backup);
     await go("#/proyecto");await page.locator("#pr-import").setInputFiles({name:"proyecto.json",mimeType:"application/json",buffer:await fs.readFile(file)});
-    await page.waitForURL("**/#/panel");assert.deepEqual(await read(),backup);
+    await page.waitForURL(u=>u.hash==="#/panel");assert.deepEqual(await read(),backup);
     await page.reload();await page.getByText("Plan consolidado de inspecciones").waitFor();assert.deepEqual(await read(),backup);
     assert.deepEqual(errors,[]);console.log("OK UT, estado, CR, VR, fecha, Df, presión, temperatura, nivel, consecuencias, proyección, JSON, adjuntos y persistencia",url);
   }finally{await browser.close();}
