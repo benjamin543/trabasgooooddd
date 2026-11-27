@@ -12,6 +12,8 @@ t_pedido = t_dis / (1 − tol); NO reduce el espesor requerido en servicio.
 """
 from __future__ import annotations
 
+from math import isfinite
+
 from .materials import allowable_stress, get_material, MaterialError
 
 T_ESTRUCTURAL_TANQUE = 2.5  # mm (0,10 in), API 653 §4.3.3.1
@@ -35,6 +37,8 @@ def pipe_b313(P, D, material, T, E=None, CA=0.0, tol_fabricacion=12.5, t_estruct
     if not (0 < E <= 1):
         raise DesignError("El factor de calidad E debe cumplir 0 < E ≤ 1.")
     t = P * D / (2.0 * (S * E * W + P * Y))
+    if t >= D / 6 or P / (S * E) > 0.385:
+        raise DesignError("Fuera del dominio de B31.3 304.1.2 para tramo recto.")
     t_adm = max(t, t_estructural)
     t_dis = t + CA
     return {
@@ -67,10 +71,10 @@ def vessel_uG27(P, Di, material, T, E=None, CA=0.0, tol_fabricacion=0.0, t_estru
     if den <= 0:
         raise DesignError("S·E − 0.6·P ≤ 0: fuera del alcance de UG-27(c)(1).")
     t = P * R / den
-    notas = [f"R corroído = Di/2 + CA = {R:.2f} mm.",
+    notas = ["Envolvente cilíndrica con igual eficiencia en ambas juntas y sólo presión interna. Gobierna el esfuerzo circunferencial.", f"R corroído = Di/2 + CA = {R:.2f} mm.",
              f"t_req = {t:.3f} mm (sin CA). Espesor de diseño = t_req + CA = {t + CA:.3f} mm."]
-    if t > R / 2.0 or P > 0.385 * S * E:
-        notas.append("ADVERTENCIA: se excede t ≤ R/2 o P ≤ 0,385·S·E; UG-27(c)(1) deja de ser aplicable (usar Apéndice 1-2).")
+    if t > R / 2.0 and P > 0.385 * S * E:
+        raise DesignError("Fuera del dominio de UG-27(c)(1).")
     t_adm = max(t, t_estructural)
     return {
         "familia": "recipiente", "norma_diseno": "ASME VIII Div.1 UG-27(c)(1)", "norma_servicio": "API 510",
@@ -83,7 +87,7 @@ def vessel_uG27(P, Di, material, T, E=None, CA=0.0, tol_fabricacion=0.0, t_estru
     }
 
 
-def tank_shell_course(D, H, G, material, E=None, CA=0.0, curso=1, es_curso_inferior=None, tol_fabricacion=0.0):
+def tank_shell_course(D, H, G, material, E=None, CA=0.0, curso=1, es_curso_inferior=None, tol_fabricacion=0.0, H_prueba=None):
     """Virola del manto de un tanque atmosférico (método de un pie).
 
     Diseño API 650 §5.6.3.2:   t_d = 4,9·D·(H−0,3)·G / S_d + CA      (prueba: t_t = 4,9·D·(H−0,3) / S_t)
@@ -92,6 +96,8 @@ def tank_shell_course(D, H, G, material, E=None, CA=0.0, curso=1, es_curso_infer
         S = mín(0,88·Y ; 0,472·T)  para las demás;  t_min ≥ 2,5 mm.
     D [m], H [m] = altura de líquido sobre el fondo de la virola, G = densidad relativa.
     """
+    if type(curso) is not int or curso < 1:
+        raise DesignError("Número de virola inválido.")
     if D <= 0 or G <= 0:
         raise DesignError("D y G deben ser > 0.")
     mat = get_material(material)
@@ -106,26 +112,36 @@ def tank_shell_course(D, H, G, material, E=None, CA=0.0, curso=1, es_curso_infer
     Hn = max(H - 0.3, 0.0)
     base = 4.9 * D * Hn
     t_d = base * G / mat["Sd"]
-    t_t = base / mat["St"]
+    t_t = 4.9 * D * max((H if H_prueba is None else H_prueba) - 0.3, 0) / mat["St"]
     t_653 = base * G / (S653 * E)
+    if D > 60:
+        raise DesignError("El método de un pie está limitado a D ≤ 60 m.")
+    minimo = 8 if D >= 36 else 6 if D >= 15 or (curso == 1 and D > 3.2) else 5
+    fabricacion = max(t_d + CA, t_t, minimo)
     t_req = max(t_653, T_ESTRUCTURAL_TANQUE)
     return {
         "familia": "tanque", "norma_diseno": "API 650 §5.6.3.2 (método de un pie)", "norma_servicio": "API 653 §4.3.3.1",
         "ecuacion": "t_min = 4,9·D·(H−0,3)·G / (S·E)",
         "entradas": [_e("D", D, "m"), _e("H (nivel sobre la virola)", round(H, 3), "m"), _e("G", G, "-"),
                      _e("S (API 653)", round(S653, 2), "MPa", "mín(0,80·Y;0,426·T)" if inferior else "mín(0,88·Y;0,472·T)"),
-                     _e("E", E, "-"), _e("Virola", curso, "-")],
-        "t_req": t_req, "t_req_calculado": t_653, "t_estructural": T_ESTRUCTURAL_TANQUE, "t_adm": t_req,
-        "t_dis_api650": t_d + CA, "t_prueba_api650": t_t, "t_dis": t_d + CA,
-        "t_pedido": (t_d + CA) / (1 - tol_fabricacion / 100.0) if tol_fabricacion else t_d + CA,
+                     _e("E", E, "-"), _e("Virola", curso, "-"), _e("H prueba sobre virola", H if H_prueba is None else H_prueba, "m"), _e("Sd", mat["Sd"], "MPa"), _e("St", mat["St"], "MPa")],
+        "t_req": fabricacion, "t_nom_min_api650": minimo, "t_req_calculado": t_653, "t_estructural": T_ESTRUCTURAL_TANQUE, "t_adm": t_req,
+        "t_dis_api650": t_d + CA, "t_prueba_api650": t_t, "t_dis": fabricacion,
+        "t_pedido": fabricacion / (1 - tol_fabricacion / 100.0),
         "tol_fabricacion_pct": tol_fabricacion, "S": S653, "E": E, "CA": CA,
         "notas": [f"t_min (API 653) = {t_653:.3f} mm; mínimo estructural {T_ESTRUCTURAL_TANQUE} mm → t_adm = {t_req:.3f} mm.",
-                  f"Diseño API 650: t_d = {t_d:.3f} + CA = {t_d + CA:.3f} mm; prueba hidrostática: t_t = {t_t:.3f} mm."],
+                  f"Mínimo de fabricación {minimo} mm; gobierna {fabricacion:.3f} mm. Diseño API 650: t_d = {t_d:.3f} + CA = {t_d + CA:.3f} mm; prueba hidrostática: t_t = {t_t:.3f} mm."],
     }
 
 
 def required_thickness(eq: dict, curso: int | None = None) -> dict:
     """Despacha el cálculo según la familia del equipo (dict del modelo de datos)."""
+    for clave in ("nivel_prueba","temp_diseno","p_diseno","nivel_diseno","g_esp","diametro_ext","diametro_int","diametro","ca","tol_fabricacion","t_estructural","e_junta","plazo_intervencion"):
+        x = eq.get(clave)
+        if x is not None and (type(x) not in (int,float) or not isfinite(x)):
+            raise DesignError(f"{clave}: valor numérico finito requerido.")
+    if eq.get("plazo_intervencion", 0) < 0 or eq.get("t_estructural", 0) < 0:
+        raise DesignError("Plazo y espesor estructural deben ser no negativos.")
     fam = eq["familia"]
     T = eq["temp_diseno"]
     mat = get_material(eq["material"])
@@ -140,11 +156,15 @@ def required_thickness(eq: dict, curso: int | None = None) -> dict:
         return vessel_uG27(eq["p_diseno"], eq["diametro_int"], eq["material"], T, eq.get("e_junta"),
                            eq.get("ca", 0.0), eq.get("tol_fabricacion", 0.0), eq.get("t_estructural", 0.0))
     if fam == "tanque":
+        if eq.get("p_diseno", 0) != 0 or eq.get("nivel_diseno", 0) <= 0:
+            raise DesignError("Modelo atmosférico con presión manométrica nula y nivel positivo.")
         cursos = eq.get("cursos") or []
         c = next((x for x in cursos if x["n"] == (curso or 1)), None)
         if c is None:
             raise DesignError(f"El tanque {eq.get('tag')} no tiene la virola {curso}.")
+        if eq.get("nivel_prueba", eq["nivel_diseno"]) <= 0 or not isinstance(c.get("h_base"), (float,int)) or c["h_base"] < 0:
+            raise DesignError("Revisar cota de virola y nivel de prueba.")
         H = eq["nivel_diseno"] - c["h_base"]
         return tank_shell_course(eq["diametro"], H, eq["g_esp"], eq["material"], eq.get("e_junta"),
-                                 eq.get("ca", 0.0), c["n"], None, eq.get("tol_fabricacion", 0.0))
+                                 eq.get("ca", 0.0), c["n"], None, eq.get("tol_fabricacion", 0.0), eq.get("nivel_prueba", eq["nivel_diseno"]) - c["h_base"])
     raise DesignError(f"Familia desconocida: {fam}")

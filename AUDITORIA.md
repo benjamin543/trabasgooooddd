@@ -1,0 +1,42 @@
+# Cota UT · matriz para la defensa
+
+Corte reproducible del caso ficticio: **27/11/2026**. El enunciado MAN040-B fija el alcance académico. Los cálculos se refieren a un componente y un punto de medida. La decisión sobre operación o reparación corresponde al responsable de integridad.
+
+| Requisito del enunciado | Evidencia que se puede mostrar | Alcance o dato pendiente |
+|---|---|---|
+| §3 y §4.1 · tres familias y registros | Planta, Equipo y Parámetros. Cinco activos, 16 CML, 19 TML, 55 UT y cuatro esquemas. Tres ubicaciones evaluables y tres campañas en cada equipo principal. | Datos ficticios. El CML fija componente y zona, el TML fija la posición repetible. |
+| §4.2 · espesores | L-101 CML-04, V-201 CML-01, T-301 CML-01. En tanque se calcula el mayor de diseño con CA, prueba con agua y placa mínima. El retiro se calcula aparte. | Confirmar material, junta, temperatura de diseño, tolerancia, espesor estructural y altura de prueba. Si falta esta última se adopta el nivel de diseño. |
+| §4.3 · documentación | En Esquema seleccionar marcadores. Historial conserva incluso los puntos con geometría excluida. El respaldo incluye las imágenes. | Los codos, cabezales, fondo, techo y componentes sin ecuación quedan fuera de la evaluación. |
+| §4.4 · corrosión y vida | Proyección muestra historial, TC corta y larga, criterio, vida desde UT y vida al corte. El plazo se calcula con 365,25 días/año. | Modelo lineal; la incertidumbre de la demo es ±0,02 mm por lectura. Hay que documentarla para datos propios. Reiniciar serie al cambiar servicio, técnica, punto o tras reparación/reemplazo. |
+| §4.5 · inspección | Panel reúne acciones, fechas y puntos pendientes. Prevalece el espesor medido igual o inferior al mínimo. En el detalle se indican fecha base, intervalo y criterio. | Seguimiento UT. No se programan inspecciones internas o externas completas. Corroborar edición, clase, topes y excepciones de servicio con el profesor. |
+| §5 · RBI | V-201. Df, frecuencia anual, probabilidad a un año bajo Poisson, pronóstico, eficacia, matriz, riesgo por área y económico. | Un mecanismo y un punto gobernante. Consecuencias ficticias, factores de ajuste unitarios, sistema de gestión y matriz docente. El crédito de cada campaña requiere fundamento. |
+| §6 · verificación | Vista Verificación y pruebas de regresión. Comparaciones independientes de las tres familias, corrosión y RBI. | La coincidencia aritmética valida los casos ensayados. |
+| §7 · Python y persistencia | El sitio carga el motor con PyScript. El servidor local emplea las mismas funciones. Respaldo en JSON, adjuntos incluidos. | La primera carga pública necesita los recursos del entorno de Python. Las copias antiguas sin incertidumbres o componente GFF requieren documentarlos para proyectar o calcular riesgo. |
+| §8–9 · defensa | PDF con cuatro integrantes, enlaces, fuentes, uso de IA y guion de 15 minutos + 5 de preguntas. | Cada integrante debe ejecutar y explicar su parte ante el profesor. |
+
+## Fuentes, supuestos y decisiones
+
+- ASME B31.3-2018, §304.1.2(a) y (b), tabla 304.1.1 y tabla A-1M para A106-B. Sólo tubo recto a presión interna. Se bloquea el cálculo cuando t ≥ D/6 o P/(SE) > 0,385. El catálogo supone W = 1 e Y = 0,4 en su intervalo.
+- ASME VIII-1 (2019), UG-27(c), y ASME II-D (2019), tabla 1A. Envolvente cilíndrica bajo presión interna con igual eficiencia para ambas juntas. UG-27(c)(1) contempla t ≤ R/2 **o** P ≤ 0,385SE. No se cubren vacío, cargas externas, uniones con eficiencias independientes ni boquillas. La presión límite local se obtiene por inversión de la ecuación con la UT disponible. Para establecer la MAWP de un equipo completo se necesitan los demás componentes, cargas y condiciones.
+- API 650, 12.ª edición (2013), §5.6.1.1 y nota 4, §5.6.3 y tabla 5.2a. Método de un pie hasta 60 m. La verificación incluye el mínimo especial de primera virola y un caso gobernado por prueba hidrostática. En servicio se emplea el modelo de manto de API 653 para pérdida general, con un mínimo académico de 2,5 mm. Antes de defender una decisión normativa, cotejar coeficientes, soldadura, espesor de retiro, límites y edición de API 653 con la copia del curso.
+- Para UT se adopta media vida y el tope de la familia desde la última campaña comparable. Los años enteros se cuentan por aniversario. Para un recipiente el seguimiento de envolvente no acredita por sí solo una inspección interna o en servicio. Para una virola con primera UT y tasa desconocida se presenta el tope docente de cinco años. Una tendencia no confiable entre campañas requiere confirmación. El grupo debe contrastar API 510, 570 y 653 con las ediciones adoptadas para la asignatura, incluidos los máximos por clase. Las fichas públicas de certificación identifican publicaciones y ediciones. [API 510](https://www.api.org/products-and-services/individual-certification-programs/certifications/api510) · [API 570](https://www.api.org/products-and-services/individual-certification-programs/certifications/api570) · [API 653](https://www.api.org/products-and-services/individual-certification-programs/certifications/api653)
+- API RP 580 (2016) como marco del proceso. Para API RP 581, 3.ª edición y enmiendas de la copia del curso hasta 2020, se cotejaron la parte 2, tabla 3.1, tablas 4.5–4.6, ecuaciones 2.12–2.20 y categorías de la parte 1, tabla 4.1M. Se usa la familia de componentes de la tabla 3.1 (PIPE, DRUM o COURSE-1-10). Las probabilidades previas y condicionales dependen de confianza y eficacia. La pérdida de espesor, las resistencias y las dispersiones intervienen en el cálculo de Df. La frecuencia se expresa en 1/año. La conversión a probabilidad a un año supone frecuencia constante: 1 − exp(−f). Los riesgos se expresan por separado en m²/año y USD/año. En tanques el mínimo de servicio se usa como aproximación docente para el parámetro resistente; corroborar el mínimo de diseño aplicable antes de usar ese escenario como RBI normativo.
+- Antes de acreditar una campaña, documentar técnica, cobertura y sensibilidad. El caso inicial asigna E a las campañas sin fundamento. Para datos reales corroborar pérdida generalizada, GFF, condiciones de contención, base monetaria y puntuación de gestión. Las normas privadas no se distribuyen en el repositorio.
+
+## Verificación reproducible
+
+| Caso independiente | Resultado de referencia |
+|---|---:|
+| B31.3, 6 MPa y D = 219,1 mm | 4,68162 mm |
+| UG-27, 1,2 MPa y R corroído = 903 mm | 9,30169 mm |
+| API 653, primera virola, D = 20 m y H = 12 m | 6,72887 mm |
+| Corrosión, margen 3 mm a 0,5 mm/año | 6 años |
+| RBI, una campaña C del caso independiente | Df 153,8712; frecuencia 0,00470846/año |
+
+Se ejecutó `python -m pytest -q`: **48 pruebas aprobadas**. Las pruebas incluyen dominios de presión, límites de diámetro, fabricación gobernada por la prueba hidráulica, incertidumbre, fecha de corte, pérdida de comparabilidad, referencias cruzadas, prioridad inmediata y efecto de las consecuencias.
+
+`tests/browser.cjs` usa Playwright con Edge en una sesión aislada. Abre el panel, introduce una UT, comprueba los cambios de tasa, vida, condición, fecha y Df, cambia presión, temperatura y nivel, duplica el área de consecuencia y compara el proyecto completo tras descargar, restaurar, importar y recargar. El recorrido se ejecutó correctamente con el servidor local. Para repetirlo con Playwright instalado: `node tests/browser.cjs URL`.
+
+## Modificaciones
+
+El motor ahora bloquea geometrías y dominios sin respaldo, calcula espesores de fabricación y servicio por separado, incorpora incertidumbre y reinicios de serie, y expone la presión límite local y ambas vidas. Se incorporaron selección de componente RBI, justificación por campaña, validación económica y plan consolidado. La interfaz conserva las rutas, los esquemas y la estética del proyecto. El JSON incluye historial de altas, ediciones y bajas de registros locales. Se añadieron dos puntos ficticios para demostrar las geometrías requeridas conservando los identificadores anteriores. Se actualizaron datos, presentación, fundamentos, README y pruebas.

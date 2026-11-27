@@ -74,6 +74,23 @@
 
   function saveLocal() {
     try {
+      const previo = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      if (previo) {
+        const cambios=[];
+        for (const tabla of ["equipos","cmls","tmls","lecturas","adjuntos"]) {
+          const antes=new Map(previo[tabla].map(r=>[r.id,r]));
+          for(const fila of state[tabla]){
+            const anterior=antes.get(fila.id);
+            if(JSON.stringify(fila)!==JSON.stringify(anterior)){
+              const campos=Object.keys(fila).filter(k=>JSON.stringify(fila[k])!==JSON.stringify(anterior?.[k]));
+              cambios.push({tabla,id:fila.id,accion:anterior?"edición":"alta",campos});
+            }
+            antes.delete(fila.id);
+          }
+          for(const id of antes.keys()) cambios.push({tabla,id,accion:"baja"});
+        }
+        if(cambios.length)(state.historial ||= []).push({fecha:new Date().toISOString(),cambios});
+      }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (e) {
       toast("No se pudo guardar en el navegador. Exporta un respaldo JSON.", true);
@@ -96,6 +113,15 @@
       const ids=new Set(p[parent].map(x=>x.id));if(p[child].some(x=>!ids.has(x[field])))throw Error("Referencia ausente en "+child);
     }
     if(p.adjuntos.some(a=>!/^data:image\/(png|jpeg|svg\+xml|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(a.dataUrl)))throw Error("Imagen de respaldo inválida.");
+    const tags=p.equipos.map(e=>String(e.tag||"").trim().toUpperCase());
+    if(tags.includes("") || new Set(tags).size!==tags.length)throw Error("TAG vacío o duplicado.");
+    for(const c of p.cmls)if(c.adjunto_id!=null && !p.adjuntos.some(a=>a.id===c.adjunto_id && a.equipo_id===c.equipo_id))throw Error("Esquema ajeno al CML.");
+    const fechas=new Set();
+    for(const l of p.lecturas){
+      const clave=l.tml_id+"/"+l.fecha;
+      if(!Number.isFinite(Date.parse(l.fecha)) || new Date(l.fecha).toISOString().slice(0,10)!==l.fecha || fechas.has(clave) || l.unidad!=="mm" || !Number.isFinite(l.espesor) || l.espesor<=0)throw Error("Fecha, unidad o espesor inválido.");
+      fechas.add(clave);
+    }
     p.seq=p.seq||{};for(const [i,key] of fields.entries()){const name=["equipo","cml","tml","lectura","adjunto"][i];p.seq[name]=p[key].reduce((m,x)=>Math.max(m,x.id),Number(p.seq[name])||0)}
   }
 
@@ -278,6 +304,8 @@
       </div>
 
       <div class="grid g5">${kpisHtml}</div>
+      <details class="card" open><summary><b>Plan consolidado de inspecciones</b></summary><div class="tw"><table><tr><th>Equipo y punto</th><th>Condición</th><th>Intervención</th><th>Fecha objetivo</th></tr>
+      ${evalData.plan.map(p=>`<tr><td>${esc(p.tag)} · ${esc(p.punto)}</td><td>${badgeEstado(p.estado)}</td><td>${esc(p.tipo)}<br>${esc(p.accion)}</td><td>${esc(p.fecha || "Por definir")}</td></tr>`).join("")}</table></div></details>
 
       <div class="grid g2">
         <div class="card">
@@ -538,6 +566,7 @@
         eq.diametro_int = Number($("#ne-dint").value);
       } else {
         eq.diametro = Number($("#ne-dtank").value);
+        if($("#ed-prueba").value==="")delete eq.nivel_prueba;else eq.nivel_prueba=Number($("#ed-prueba").value);
         eq.nivel_diseno = Number($("#ne-htank").value);
         eq.g_esp = Number($("#ne-g").value);
         eq.cursos = [
@@ -663,8 +692,8 @@
             <tr><th>Material / S(T)</th><td>${esc(eq.material)} · ${fmt(req.S, 1)} MPa (a ${eq.temp_diseno} °C)</td></tr>
             <tr><th>Eficiencia junta (E)</th><td>${fmt(req.E, 2)}</td></tr>
             <tr><th>Corrosión admisible (CA)</th><td>${fmt(req.CA, 2)} mm</td></tr>
-            <tr><th>t_req (sin CA)</th><td><b>${fmt(req.t_req, 3)} mm</b></td></tr>
-            <tr><th>t_dis (con CA)</th><td>${fmt(req.t_dis, 3)} mm</td></tr>
+            <tr><th>${eq.familia==="tanque"?"Espesor requerido de fabricación":"t_req (sin CA)"}</th><td><b>${fmt(req.t_req, 3)} mm</b></td></tr>
+            <tr><th>t_dis (con CA)</th><td>${fmt(req.t_dis_api650 ?? req.t_dis, 3)} mm</td></tr>
           </table>
           ${req.notas?.length ? `<div class="note small">${req.notas.map((n) => esc(n)).join("<br>")}</div>` : ""}
         </div>
@@ -672,7 +701,7 @@
 
       <div class="card">
         <h2>Resumen RBI (API RP 581)</h2>
-        ${rbi.error ? `<div class="note bad">${esc(rbi.error)}</div>` : `
+        ${rbi.df == null ? `<div class="note bad">${esc(rbi.error || "Sin componente evaluable.")}</div>` : `
           <div class="grid g4">
             <div><span class="small mut">Nivel de Riesgo</span><div>${badgeNivel(rbi.nivel)} (P${rbi.cat_prob}-${rbi.cat_cons})</div></div>
             <div><span class="small mut">Factor de daño (Df)</span><div><b>${fmt(rbi.df, 2)}</b></div></div>
@@ -686,7 +715,8 @@
 
   function renderEqEspesores(body, eq, ev) {
     const misCmls = state.cmls.filter((c) => c.equipo_id === eq.id);
-    const tmlRows = ev.tmls.map((t) => {
+    const excluidos=misCmls.flatMap(c=>state.tmls.filter(t=>t.cml_id===c.id && !ev.tmls.some(p=>p.tml_id===t.id)).map(t=>({tml_id:t.id,tml:t.codigo,cml:c.codigo,estado:"info_insuficiente"})));
+    const tmlRows = [...ev.tmls,...excluidos].map((t) => {
       const lects = state.lecturas
         .filter((l) => l.tml_id === t.tml_id)
         .sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -754,10 +784,10 @@
                 <select id="add-l-ev">
                   <option value="">Medición normal</option>
                   <option value="cambio_punto">Cambio de punto (reinicia serie)</option><option value="reemplazo">Reemplazo (reinicia serie)</option>
-                  <option value="reparacion">Reparación (reinicia serie)</option>
+                  <option value="cambio_servicio">Cambio de servicio</option><option value="reparacion">Reparación (reinicia serie)</option>
                 </select>
               </div>
-              <div><label>Observaciones</label><input id="add-l-obs" placeholder="Opcional"></div>
+              <div><label>Incertidumbre UT ± mm</label><input type="number" min="0" step="any" id="inc-ut"></div><div><label>Observaciones</label><input id="add-l-obs" placeholder="Opcional"></div>
             </div>
             <button class="btn" id="btn-add-lect" style="margin-top:10px">+ Agregar lectura</button>
           ` : `<p class="mut">Primero crea un CML y TML.</p>`}
@@ -767,7 +797,7 @@
           <h2>Agregar CML / TML</h2>
           <div class="grid g2">
             <div><label>Código CML</label><input id="add-c-cod" placeholder="Ej: CML-04"></div>
-            <div><label>Componente</label><input id="add-c-comp" placeholder="Ej: Codo / Envolvente"></div>
+            <div><label>Componente</label><select id="add-c-comp">${(eq.familia==="tuberia"?["Tramo recto","Codo","Otro"]:eq.familia==="recipiente"?["Envolvente","Cabezal","Otro"]:["Virola","Fondo","Otro"]).map(g=>`<option>${g}</option>`).join("")}</select></div>
             <div><label>Ubicación</label><input id="add-c-ubic" placeholder="Ej: Zona inferior"></div>
             ${eq.familia === "tanque" ? `<div><label>Virola (Curso)</label><input id="add-c-curso" type="number" min="1" max="10" value="1"></div>` : ""}
             <div><label>Código primer TML</label><input id="add-t-cod" value="T1"></div>
@@ -791,7 +821,7 @@
 
     const btnLect = $("#btn-add-lect", body);
     const requested=Number(location.hash.split("/")[3]);
-    if(requested && tmlOpts && ev.tmls.some(t=>t.tml_id===requested))$("#add-l-tml").value=String(requested);
+    if(requested && tmlOpts && [...$("#add-l-tml").options].some(t=>Number(t.value)===requested))$("#add-l-tml").value=String(requested);
     if (btnLect) {
       btnLect.onclick = () => {
         const tml_id = Number($("#add-l-tml").value);
@@ -799,7 +829,10 @@
         const espesor = Number($("#add-l-esp").value);
         if (fecha > new Date().toISOString().slice(0,10) || state.lecturas.some(l => l.tml_id === tml_id && l.fecha === fecha)) return toast("Usa una fecha única del punto y anterior o igual a hoy.", true);
         if (!fecha || !Number.isFinite(espesor) || espesor <= 0) return toast("Datos de lectura inválidos.", true);
+        const u=$("#inc-ut").value;
+        if(fecha<eq.fecha_instalacion || !$("#inc-ut").checkValidity())return toast("Comprueba la fecha de instalación y la incertidumbre.",true);
         state.lecturas.push({
+          ...(u ? {incertidumbre_mm:Number(u)} : {}),
           id: nextId("lectura"),
           tml_id,
           fecha,
@@ -818,6 +851,8 @@
     $("#btn-add-cml", body).onclick = () => {
       const codigo = $("#add-c-cod").value.trim();
       if (!codigo) return toast("Ingresa un código de CML.", true);
+      if(misCmls.some(c=>c.codigo.toUpperCase()===codigo.toUpperCase()))return toast("Código CML duplicado.",true);
+      if(eq.familia==="tanque" && !eq.cursos.some(c=>c.n===Number($("#add-c-curso").value)))return toast("Virola inexistente.",true);
       const cmlId = nextId("cml");
       const cursoEl = $("#add-c-curso");
       state.cmls.push({
@@ -1030,12 +1065,8 @@
   function renderEqRbi(body, eq, ev) {
     const r = ev.rbi || {};
     const cfg = eq.rbi || {};
-    if (r.error) {
-      body.innerHTML = `<div class="card note bad">${esc(r.error)}</div>`;
-      return;
-    }
-
-    body.innerHTML = `
+    const fechas=(ev.tmls.find(t=>t.tml_id===ev.gobernante_ref?.tml_id)?.serie_comparable||[]).map(l=>l.fecha);
+    body.innerHTML = (r.df == null ? `<p class="card note warn">${esc(r.error || "Sin punto evaluable para RBI.")}</p>` : `
       <div class="grid g4">
         <div class="card"><span class="small mut">Categoría / Nivel</span><h2>${badgeNivel(r.nivel)}</h2><span class="small mut">P${r.cat_prob} · Cons. ${r.cat_cons}</span></div>
         <div class="card"><span class="small mut">Factor de Daño Df</span><h2>${fmt(r.df, 2)}</h2><span class="small mut">Df base = ${fmt(r.df_base, 2)}</span></div>
@@ -1047,6 +1078,7 @@
         <div class="card">
           <h2>Adelgazamiento generalizado</h2><p>API RP 581, parte 2 §4.5.7. Df = Σ Pᵢ Φ(−βᵢ) / 0,000156. Frecuencia anual = gff × Df × Fms. RA = fF × CA y RE = fF × CE.</p><p>Escenario: ${esc(r.escenario)}. Base económica: ${esc(r.base_valoracion)} (${esc(r.moneda)}).</p>
           <table>
+            <tr><th>Probabilidad a un año (Poisson, frecuencia constante)</th><td>${fmt(100*r.prob_1a,4)} %</td></tr>
             <tr><th>Flow Stress (FS)</th><td class="num">${fmt(r.FS, 2)} MPa</td></tr>
             <tr><th>Fracción pérdida espesor (Art)</th><td class="num">${fmt(r.art, 4)}</td></tr>
             <tr><th>Strength Ratio (SR)</th><td class="num">${fmt(r.sr, 4)}</td></tr>
@@ -1092,8 +1124,12 @@
         </div>
       </div>
 
-      <div class="card">
+      `) + `<div class="card">
         <h2>Editar parámetros RBI del equipo</h2>
+        <label>Componente GFF</label><select id="rbi-comp"><option value="">Seleccione</option>${(eq.familia==="tanque"?["COURSE-1-10"]:eq.familia==="recipiente"?["DRUM"]:["PIPE-4","PIPE-6","PIPE-8"]).map(v=>`<option ${cfg.componente_gff===v?"selected":""}>${v}</option>`).join("")}</select>
+        <label>Base de valoración en USD</label><input id="rbi-valor" value="${esc(cfg.base_valoracion||"")}">
+        <h3>Eficacia por campaña del punto gobernante</h3>
+        ${fechas.map(f=>`<label>${esc(f)}<select data-eff="${esc(f)}">${["E","D","C","B","A"].map(v=>`<option ${cfg.eficacias?.[f]===v?"selected":""}>${v}</option>`).join("")}</select></label><label>Fundamento de cobertura y técnica<input data-just="${esc(f)}" value="${esc(cfg.justificaciones?.[f]||"")}"></label>`).join("")}
         <div class="grid g3">
           <div><label>Área consecuencia CA [m²]</label><input id="rbi-ca" type="number" step="any" value="${cfg.ca_m2 ?? 0}"></div>
           <div><label>Costo consecuencia CE [USD]</label><input id="rbi-ce" type="number" step="any" value="${cfg.ce ?? 0}"></div>
@@ -1106,12 +1142,6 @@
             </select>
           </div>
           <div><label>Score gestión (0–100)</label><input id="rbi-fms" type="number" min="0" max="100" value="${cfg.score_gestion ?? 50}"></div>
-          <div>
-            <label>Eficacia inspección por defecto</label>
-            <select id="rbi-ef">
-              ${["A", "B", "C", "D", "E"].map((x) => `<option value="${x}" ${cfg.eficacia_defecto === x ? "selected" : ""}>${x}</option>`).join("")}
-            </select>
-          </div>
           <div>
             <label>Base de espesor (API 581 §4.5.5)</label>
             <select id="rbi-base">
@@ -1127,11 +1157,17 @@
     $("#btn-save-rbi", body).onclick = () => {
       eq.rbi = eq.rbi || {};
       if (["#rbi-ca","#rbi-ce"].some(k=>!$(k).value || !Number.isFinite(Number($(k).value)) || Number($(k).value)<0))return toast("Ingrese consecuencias válidas y no negativas.",true);
+      if(!$("#rbi-fms").value || !$("#rbi-fms").checkValidity() || !$("#rbi-valor").value.trim() || !$("#rbi-comp").value)return toast("Revisa gestión, componente y base económica.",true);
       eq.rbi.ca_m2 = Number($("#rbi-ca").value);
       eq.rbi.ce = Number($("#rbi-ce").value);
       eq.rbi.confianza = $("#rbi-conf").value;
       eq.rbi.score_gestion = Number($("#rbi-fms").value);
-      eq.rbi.eficacia_defecto = $("#rbi-ef").value;
+      eq.rbi.moneda="USD";
+      eq.rbi.base_valoracion=$("#rbi-valor").value.trim();
+      eq.rbi.componente_gff=$("#rbi-comp").value;
+      eq.rbi.eficacias ||= {}; eq.rbi.justificaciones ||= {};
+      for(const s of body.querySelectorAll("[data-eff]"))eq.rbi.eficacias[s.dataset.eff]=s.value;
+      for(const i of body.querySelectorAll("[data-just]"))eq.rbi.justificaciones[i.dataset.just]=i.value.trim();
       eq.rbi.base_espesor = $("#rbi-base").value;
       recalc();
       toast("Parámetros RBI actualizados.");
@@ -1155,12 +1191,12 @@
           <div><label>Corrosión admisible CA [mm]</label><input id="ed-ca" type="number" step="any" value="${eq.ca}"></div>
           <div><label>Eficiencia junta E</label><input id="ed-e" type="number" step="any" value="${eq.e_junta}"></div>
           <div><label>Plazo intervención [años]</label><input id="ed-plazo" type="number" step="any" value="${eq.plazo_intervencion ?? 2}"></div>
-          <div><label>CR asumida si falta dato [mm/a]</label><input id="ed-cras" type="number" step="any" value="${eq.cr_asumida ?? 0.2}"></div>
+
           ${eq.familia === "tuberia" ? `<div><label>Diámetro exterior [mm]</label><input id="ed-dim" type="number" step="any" value="${eq.diametro_ext}"></div>` : ""}
           ${eq.familia === "recipiente" ? `<div><label>Diámetro interior [mm]</label><input id="ed-dim" type="number" step="any" value="${eq.diametro_int}"></div>` : ""}
           ${eq.familia === "tanque" ? `
             <div><label>Diámetro tanque [m]</label><input id="ed-dim" type="number" step="any" value="${eq.diametro}"></div>
-            <div><label>Nivel diseño H [m]</label><input id="ed-niv" type="number" step="any" value="${eq.nivel_diseno}"></div>
+            <div><label>Nivel de prueba hidrostática [m]</label><input id="ed-prueba" type="number" step="any" placeholder="Igual al nivel de diseño" value="${eq.nivel_prueba ?? ""}"></div><div><label>Nivel diseño H [m]</label><input id="ed-niv" type="number" step="any" value="${eq.nivel_diseno}"></div>
             <div><label>Gravedad específica G</label><input id="ed-g" type="number" step="any" value="${eq.g_esp}"></div>
           ` : ""}
         </div>
@@ -1169,6 +1205,8 @@
     `;
 
     $("#btn-save-ed", body).onclick = () => {
+      const tag=$("#ed-tag").value.trim().toUpperCase();
+      if(!tag || state.equipos.some(e=>e.id!==eq.id && e.tag.toUpperCase()===tag))return toast("Se requiere un TAG único.",true);
       const original=structuredClone(eq);
       for(const k of ["planta","area","sistema","componente","servicio","fluido","circuito"]){if($("#ed-"+k))eq[k]=$("#ed-"+k).value.trim()}
       eq.p_oper=$("#ed-po").value===""?null:Number($("#ed-po").value);eq.temp_oper=$("#ed-to").value===""?null:Number($("#ed-to").value);
@@ -1180,11 +1218,12 @@
       eq.ca = Number($("#ed-ca").value);
       eq.e_junta = Number($("#ed-e").value);
       eq.plazo_intervencion = Number($("#ed-plazo").value);
-      eq.cr_asumida = Number($("#ed-cras").value);
+
       if (eq.familia === "tuberia") eq.diametro_ext = Number($("#ed-dim").value);
       if (eq.familia === "recipiente") eq.diametro_int = Number($("#ed-dim").value);
       if (eq.familia === "tanque") {
         eq.diametro = Number($("#ed-dim").value);
+        if($("#ed-prueba").value==="")delete eq.nivel_prueba;else eq.nivel_prueba=Number($("#ed-prueba").value);
         eq.nivel_diseno = Number($("#ed-niv").value);
         eq.g_esp = Number($("#ed-g").value);
       }
@@ -1201,7 +1240,7 @@
     const matOpts = Object.keys(catalog || {}).map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
     app.innerHTML = `
       <h1>Calculadora de Espesor Mínimo (t_min / t_req)</h1>
-      <p class="sub">Cálculo normativo directo ejecutado en Python (ASME B31.3, ASME VIII Div.1 UG-27 y API 653/650).</p>
+      <p class="sub">Cálculo académico ejecutado en Python (ASME B31.3, ASME VIII Div.1 UG-27 y API 653/650).</p>
       <div class="grid g2">
         <div class="card">
           <h2>Datos de entrada</h2>
@@ -1247,7 +1286,7 @@
           <div><label>Nivel líquido H [m]</label><input id="c-htank" type="number" step="any" value="12"></div>
           <div><label>Gravedad específica G</label><input id="c-g" type="number" step="any" value="0.85"></div>
           <div><label>Curso (virola #)</label><input id="c-curso" type="number" min="1" value="1"></div>
-          <div><label>Cota base virola [m]</label><input id="c-hbase" type="number" step="any" value="0.0"></div>`;
+          <div><label>Nivel de prueba [m]</label><input id="c-hprueba" type="number" step="any" placeholder="Igual al nivel de diseño"></div><div><label>Cota base virola [m]</label><input id="c-hbase" type="number" step="any" value="0.0"></div>`;
       }
     };
     $("#c-fam").onchange = drawExtra;
@@ -1271,6 +1310,7 @@
         payload.nivel_diseno = $("#c-htank").value;
         payload.g_esp = $("#c-g").value;
         payload.curso = $("#c-curso").value;
+        if($("#c-hprueba").value)payload.nivel_prueba=$("#c-hprueba").value;
         payload.h_base = $("#c-hbase").value;
       }
       try {
@@ -1280,9 +1320,9 @@
           <div class="eq">${esc(r.ecuacion)}</div>
           <table>
             <tr><th>Esfuerzo admisible S(T)</th><td class="num">${fmt(r.S, 2)} MPa</td></tr>
-            <tr><th>t_req (calculado por presión)</th><td class="num"><b>${fmt(r.t_req, 4)} mm</b></td></tr>
+            <tr><th>${fam==="tanque"?"Espesor requerido de fabricación":"t_req (calculado por presión)"}</th><td class="num"><b>${fmt(r.t_req, 4)} mm</b></td></tr>
             <tr><th>t_adm (mínimo admisible en servicio)</th><td class="num"><b>${fmt(r.t_adm, 4)} mm</b></td></tr>
-            <tr><th>t_dis (diseño con CA)</th><td class="num">${fmt(r.t_dis, 4)} mm</td></tr>
+            <tr><th>t_dis (diseño con CA)</th><td class="num">${fmt(r.t_dis_api650 ?? r.t_dis, 4)} mm</td></tr>
             ${r.t_pedido ? `<tr><th>t_pedido (incl. tolerancia fab.)</th><td class="num">${fmt(r.t_pedido, 4)} mm</td></tr>` : ""}
           </table>
           ${r.notas?.length ? `<div class="note small">${r.notas.map((n) => esc(n)).join("<br>")}</div>` : ""}
@@ -1343,7 +1383,7 @@
        <p>${esc(state.meta?.nombre || "Proyecto local")}</p>
        <a class="action-link" href="#/proyeccion">Ver proyección de vida →</a></div>
        <dl><div><dt>Equipos</dt><dd>${state.equipos.length}</dd></div><div><dt>Puntos TML</dt><dd>${state.tmls.length}</dd></div><div><dt>Lecturas</dt><dd>${state.lecturas.length}</dd></div></dl></section>
-       <section class="card assignment"><div><h2>Planificación y análisis de espesores</h2><p>Consulta el isométrico marcado, el historial UT y la conclusión de inspección en las dos hojas de la Tarea 3.</p></div><a class="btn ghost" href="cuaderno.html">Abrir cuaderno académico</a></section><h2>Datos del proyecto</h2>
+       <section class="card assignment"><div><h2>Planificación y análisis de espesores</h2><p>Consulta el isométrico marcado, el historial UT y la conclusión de inspección en las dos hojas de la Tarea 3.</p></div><a class="btn ghost" href="cuaderno.html">Abrir cuaderno académico</a></section><details class="card"><summary>Historial de cambios</summary>${(state.historial||[]).slice().reverse().map(h=>`<p>${esc(h.fecha)} · ${esc(h.cambios.map(c=>c.accion+" "+c.tabla+" #"+c.id+" "+(c.campos||[]).join(", ")).join(" / "))}</p>`).join("")||"Sin cambios registrados."}</details><h2>Datos del proyecto</h2>
       <p class="sub">Persistencia local en el navegador (<code>localStorage</code>) e intercambio mediante archivos JSON.</p>
       <div class="grid g2">
         <div class="card">
@@ -1425,6 +1465,7 @@
       <div class="card">
         <h2>Arquitectura y Normativa Aplicada</h2>
         <ul>
+          <li><b>Auditoría.</b> Plan consolidado en Panel. Codos y cabezales requieren ecuaciones específicas. La presión simplificada de un punto supone sólo presión interna, geometría corroída y temperatura de diseño. El grupo debe corroborar E, geometría, espesor estructural, altura de prueba, material y condiciones reales. <a href="AUDITORIA.md">Matriz y verificaciones</a>.</li>
           <li><b>Fuentes del caso.</b> ASME B31.3-2018, tabla A-1M y §304.1.2. ASME VIII-1 (2019), UG-27 y ASME II-D (2019), tabla 1A. API 650 (12.ª ed., 2013), tabla 5.2a. API RP 580 (3.ª ed., 2016) y API RP 581 (3.ª ed., 2016, con enmiendas hasta 2020).</li>
           <li><b>Inspección en servicio.</b> Reglas académicas de API 510, 570 y 653. Ediciones de estas tres normas pendientes de corroboración con la biblioteca del curso. Alcance: próximas mediciones UT; en tanques, solo el manto. El fondo, techo, soldaduras e inspecciones internas requieren antecedentes propios.</li>
           <li><b>Uso de IA.</b> Codex apoyó la implementación y las pruebas. Los casos independientes confrontan las salidas con cálculo manual y una evaluación separada del RBI.</li>

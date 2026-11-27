@@ -176,6 +176,15 @@ add_cml(t301, a, "CML-03", "Virola 3", "Cota 4,8–7,2 m", 70, 40, {
 add_cml(t301, a, "CML-04", "Virola 5", "Cota 9,6–12 m", 70, 17, {
     "T1": ("N", [("2010-06-01", 6.0), ("2018-05-20", 5.9), ("2026-05-22", 5.8)])}, curso=5)
 
+# Puntos ficticios adicionales de geometría evaluable. Los ID históricos se conservan.
+add_cml(l101, {"id": 1}, "CML-04", "Tramo recto", "Tramo horizontal antes de salida", 72, 73, {
+    "T1": ("3 en punto", [("2018-04-10", 8.12), ("2022-04-12", 6.68), ("2026-04-15", 5.26)])})
+add_cml(v201, {"id": 2}, "CML-04", "Envolvente", "Generatriz lateral", 58, 50, {
+    "T1": ("270°", [("2012-05-08", 15.82), ("2018-05-10", 15.10), ("2024-05-14", 14.42)])})
+for equipo in state["equipos"]:
+    equipo["rbi"]["componente_gff"] = {"L-101":"PIPE-8", "L-102":"PIPE-4","V-201":"DRUM","V-202":"DRUM","T-301":"COURSE-1-10"}[equipo["tag"]]
+for lectura in state["lecturas"]:
+    lectura["incertidumbre_mm"] = 0.02  # supuesto del ejercicio, por lectura
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 with open(OUT, "w", encoding="utf-8") as f:
     json.dump(state, f, ensure_ascii=False, separators=(",", ":"))

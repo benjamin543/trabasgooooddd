@@ -85,13 +85,14 @@ def count_inspections(eficacias: list[str]) -> dict:
 def posterior(confianza: str, cuenta: dict) -> tuple[float, float, float]:
     """Ec. (2.16)–(2.17): I_i = Pr_i·ΠCo_i^N ; Po_i = I_i/ΣI."""
     pri = PRIOR[confianza]
-    I = []
+    logs = []
     for i in range(3):
-        v = pri[i]
+        v = math.log(pri[i])
         for eff, n in cuenta.items():
             if n:
-                v *= CONDICIONAL[eff][i] ** n
-        I.append(v)
+                v += n * math.log(CONDICIONAL[eff][i])
+        logs.append(v)
+    I = [math.exp(v - max(logs)) for v in logs]
     s = sum(I)
     return tuple(x / s for x in I)
 
@@ -152,12 +153,20 @@ def rbi_case(familia: str, cr: float, age_tk: float, t_rdi: float, t_min: float,
              YS: float, TS: float, ca_m2: float, ce: float, confianza: str, eficacias: list[str],
              score_gestion: float = 50.0, gff: float | None = None, **ajustes) -> dict:
     """Caso RBI completo: Df, fF, RA = fF·CA [m²/año], RE = fF·CE [moneda/año], categoría y nivel de riesgo."""
+    if any(not math.isfinite(x) for x in (cr, age_tk, t_rdi, t_min, S, E, YS, TS, ca_m2, ce, score_gestion)):
+        raise ValueError("Los parámetros RBI deben ser finitos.")
+    if min(cr, age_tk, ca_m2, ce) < 0 or not 0 <= score_gestion <= 100 or min(S, E, YS, TS) <= 0 or E > 1:
+        raise ValueError("Consecuencia, gestión o parámetros mecánicos fuera de dominio.")
+    if confianza not in PRIOR or any(e not in CONDICIONAL for e in eficacias):
+        raise ValueError("Revisar confianza y eficacia por campaña.")
     d = thinning_df(cr, age_tk, t_rdi, t_min, S, E, YS, TS, confianza, eficacias, **ajustes)
+    if gff is not None and (not math.isfinite(gff) or gff <= 0):
+        raise ValueError("GFF debe ser positiva y finita.")
     g = GFF_TOTAL[familia] if gff is None else gff
     fms = management_factor(score_gestion)
     ff = g * d["df"] * fms
     cp, cc = prob_category(d["df"]), cons_category(ca_m2)
-    return {**d, "gff": g, "fms": fms, "ff": ff, "ra": ff * ca_m2, "re": ff * ce,
+    return {**d, "gff": g, "fms": fms, "ff": ff, "prob_1a": -math.expm1(-ff), "ra": ff * ca_m2, "re": ff * ce,
             "cat_prob": cp, "cat_cons": cc, "nivel": risk_level(cp, cc)}
 
 

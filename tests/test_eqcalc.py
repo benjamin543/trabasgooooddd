@@ -94,9 +94,9 @@ def test_fechas_inconsistentes_se_descartan():
 
 def test_velocidad_nula_y_negativa():
     r = cor.analyze_tml([lect("2020-01-01", 10.0), lect("2024-01-01", 10.0)], 5.0, 2.0)
-    assert r["cr_adoptada"] == 0.0 and r["vr"] is None
+    assert r["cr_adoptada"] is None and r["vr"] is None
     r2 = cor.analyze_tml([lect("2020-01-01", 9.0), lect("2024-01-01", 10.0)], 5.0, 2.0)
-    assert r2["cr_adoptada"] == 0.0 and any("aumento" in a.lower() for a in r2["avisos"])
+    assert r2["cr_adoptada"] is None and any("aumento" in a.lower() for a in r2["avisos"])
 
 
 def test_reemplazo_reinicia_serie_comparable():
@@ -119,7 +119,7 @@ def test_api510_regla_vida_media():
     r = ins.next_inspection("recipiente", None, 40.0, True, "2025-01-01", hoy)
     assert r["intervalo_anios"] == pytest.approx(10.0)          # tope API 510
     r = ins.next_inspection("recipiente", None, 3.0, True, "2025-01-01", hoy)
-    assert r["intervalo_anios"] == pytest.approx(2.0)           # VR < 4 a: máx. 2 años
+    assert r["intervalo_anios"] == pytest.approx(1.5)           # media vida desde la UT
 
 
 def test_api570_clase():
@@ -216,7 +216,7 @@ def test_proyecto_demo_cubre_los_cinco_estados():
     assert fams == {"tuberia", "recipiente", "tanque"}
     for e in r["equipos"]:
         assert not e["errores"], e["tag"]
-        assert e["rbi"] and "df" in e["rbi"]
+        assert ("error" if e["tag"] == "L-102" else "df") in e["rbi"]
     # Tres CML por familia y ≥ 3 campañas históricas en cada familia del caso demostrativo
     for fam in fams:
         eq_ids = [e["id"] for e in estado["equipos"] if e["familia"] == fam]
@@ -260,3 +260,94 @@ def test_clase_uno_plazo_docente_y_serie_no_evaluable():
     largo = ins.next_inspection("tuberia", 1, 14.0, True, "2024-02-29", hoy)
     assert largo["fecha_limite"] == "2029-02-28"
 
+
+
+@pytest.mark.parametrize("diametro,curso,minimo", [(3.2,1,5),(3.21,1,6),(14.9,2,5),(15,2,6),(36,1,8),(60,1,8)])
+def test_api650_minimo_fabricacion(diametro,curso,minimo):
+    r = dsg.tank_shell_course(diametro, 0.31, 0.8, "A36", curso=curso)
+    assert r["t_req"] == minimo
+    assert r["t_adm"] == 2.5
+
+
+def test_api650_prueba_gobierna_y_limite_un_pie():
+    r = dsg.tank_shell_course(36, 4, 0.7, "A36", CA=0.3, H_prueba=20)
+    assert r["t_req"] == pytest.approx(4.9*36*19.7/171)
+    with pytest.raises(dsg.DesignError):
+        dsg.tank_shell_course(60.01, 4, 0.7, "A36")
+
+
+@pytest.mark.parametrize("familia,presion", [("tuberia",54), ("recipiente",50)])
+def test_fuera_de_dominio_bloquea_resultados(familia,presion):
+    with open(DEMO, encoding="utf8") as f:
+        s = json.load(f)
+    e = next(x for x in s["equipos"] if x["familia"]==familia)
+    e["p_diseno"] = presion
+    r = next(x for x in evaluate_project(s,"2026-11-27")["equipos"] if x["id"]==e["id"])
+    assert r["estado"]=="info_insuficiente" and r["errores"]
+    assert not r["tmls"] and not r.get("rbi") and r.get("vr") is None
+
+
+def test_geometrias_excluidas_plan_y_mawp():
+    with open(DEMO,encoding="utf8") as f:
+        s=json.load(f)
+    pro=evaluate_project(s,"2026-11-27")
+    l,v=pro["equipos"][0],pro["equipos"][2]
+    assert l["excluidos"]==["CML-01"] and v["excluidos"]==["CML-03"]
+    assert all(t["cml"] not in l["excluidos"] for t in l["tmls"])
+    t=l["tmls"][0]
+    assert t["mawp_punto_mpa"] == pytest.approx(2*138*t["t_med"]/(219.1-0.8*t["t_med"]))
+    assert pro["plan"][0]["estado"]=="bajo_minimo"
+    assert pro["plan"][0]["fecha"]=="2026-11-27"
+
+
+def test_incertidumbre_cambio_servicio_y_vida_al_corte():
+    a,b=lect("2020-01-01",8),lect("2024-01-01",7.9)
+    a["incertidumbre_mm"]=b["incertidumbre_mm"]=0.06
+    assert not cor.analyze_tml([a,b],5,2)["suficiente"]
+    b["espesor"]=7.0
+    r=cor.analyze_tml([a,b],5,2,date(2025,1,1))
+    assert r["vr_al_corte"] == pytest.approx(r["vr_desde_ut"]-366/365.25)
+    b["evento"]="cambio_servicio"
+    assert cor.analyze_tml([a,b],5,2)["vr"] is None
+
+
+@pytest.mark.parametrize("campo,valor", [("ce",-1),("ca_m2",float("inf")),("score_gestion",101),("gff",0)])
+def test_rbi_validacion(campo,valor):
+    args=dict(familia="recipiente",cr=.4,age_tk=5,t_rdi=10,t_min=6,S=137.9,E=.85,YS=260,TS=485,ca_m2=350,ce=900000,confianza="media",eficacias=["C"])
+    with pytest.raises(ValueError):
+        rb.rbi_case(**{**args,campo:valor})
+
+
+def test_eficacia_solo_con_evidencia_y_probabilidad_anual():
+    with open(DEMO,encoding="utf8") as f:
+        s=json.load(f)
+    cfg=s["equipos"][2]["rbi"]
+    cfg["eficacias"]={"2024-05-14":"A"}
+    r=evaluate_project(s,"2026-11-27")["equipos"][2]["rbi"]
+    assert r["eficacias"]==["E"] and r["prob_1a"]==pytest.approx(1-math.exp(-r["ff"]))
+    cfg["justificaciones"]={"2024-05-14":"Cobertura y eficacia asumidas sólo para el ensayo"}
+    rr=evaluate_project(s,"2026-11-27")["equipos"][2]["rbi"]
+    assert rr["eficacias"]==["A"] and rr["df"]<r["df"]
+
+
+@pytest.mark.parametrize("tabla,campo,valor", [("equipos","id",0),("equipos","tag","L-102"),("tmls","cml_id",100000),("cmls","adjunto_id",2),("lecturas","fecha","1900-01-01")])
+def test_rechaza_identificadores_fechas_y_relaciones(tabla,campo,valor):
+    with open(DEMO,encoding="utf8") as f:
+        s=json.load(f)
+    s[tabla][0][campo]=valor
+    with pytest.raises(ValueError):
+        evaluate_project(s,"2026-11-27")
+
+
+def test_incertidumbre_ausente_y_cr_negativa_no_aplazan_inspeccion():
+    with open(DEMO,encoding="utf8") as f:
+        s=json.load(f)
+    e=s["equipos"][-1]
+    ids={c["id"] for c in s["cmls"] if c["equipo_id"]==e["id"]}
+    puntos={t["id"] for t in s["tmls"] if t["cml_id"] in ids}
+    for l in s["lecturas"]:
+        if l["tml_id"] in puntos:
+            del l["incertidumbre_mm"]
+    tanque=evaluate_project(s,"2026-11-27")["equipos"][-1]
+    assert tanque["inspeccion"] is None and tanque["estado"]=="info_insuficiente"
+    assert "error" in tanque["rbi"]

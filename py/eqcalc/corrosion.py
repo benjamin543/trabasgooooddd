@@ -5,13 +5,13 @@ from datetime import date
 from math import isfinite
 
 DIAS_ANIO = 365.25
-EVENTOS_REINICIO = ("reparacion", "reemplazo", "cambio_punto")  # rompen la comparabilidad de la serie
+EVENTOS_REINICIO = ("reparacion", "reemplazo", "cambio_punto", "cambio_servicio")  # rompen la comparabilidad de la serie
 
 
 def parse_date(s) -> date:
     if isinstance(s, date):
         return s
-    return date.fromisoformat(str(s)[:10])
+    return date.fromisoformat(str(s))
 
 
 def years_between(d0: date, d1: date) -> float:
@@ -54,16 +54,16 @@ def comparable_segment(serie: list[dict]) -> tuple[list[dict], list[str]]:
     avisos: list[str] = []
     inicio = 0
     for i, r in enumerate(serie):
-        if r.get("evento") in EVENTOS_REINICIO:
+        if r.get("evento") in EVENTOS_REINICIO or (i and r.get("tecnica", "UT") != serie[i-1].get("tecnica", "UT")) or r.get("comparable") is False:
             inicio = i
-            avisos.append(f"{r['fecha']}: {r['evento'].replace('_', ' ')}; la serie comparable se reinicia en esa lectura.")
+            avisos.append(f"{r['fecha']}: {(r.get('evento') or 'cambio de comparabilidad').replace('_', ' ')}; la serie comparable se reinicia en esa lectura.")
     return serie[inicio:], avisos
 
 
 def corrosion_rates(segmento: list[dict]) -> dict:
     """Velocidades de corrosión [mm/año]: corto plazo (2 últimas), largo plazo (primera→última) y adoptada.
 
-    Criterio de adopción: la MAYOR de ambas (conservador); si ninguna es positiva → 0 (velocidad nula).
+    Criterio de adopción: la MAYOR de ambas (conservador); requiere pérdida distinguible y tendencias compatibles.
     """
     n = len(segmento)
     res = {"n": n, "cr_corto": None, "cr_largo": None, "cr_adoptada": None, "criterio": "", "avisos": []}
@@ -77,9 +77,15 @@ def corrosion_rates(segmento: list[dict]) -> dict:
     res["cr_largo"] = (pri["espesor"] - ult["espesor"]) / yl
     cand = [c for c in (res["cr_corto"], res["cr_largo"]) if c is not None]
     mayor = max(cand)
-    if mayor <= 1e-9:
-        res["cr_adoptada"] = 0.0
-        res["criterio"] = "Velocidad nula o negativa (el espesor no disminuye): se adopta CR = 0; la VR no es evaluable con esta tendencia; verificar comparabilidad."
+    def incertidumbre(r):
+        return r.get("incertidumbre_mm", 0)
+    if any(not isinstance(incertidumbre(r), (int, float)) or not isfinite(incertidumbre(r)) or incertidumbre(r) < 0 for r in segmento):
+        res["criterio"] = "Incertidumbre inválida: verificar las mediciones."
+        return res
+    candidato = pen if res["cr_corto"] >= res["cr_largo"] else pri
+    if min(cand) < 0 or candidato["espesor"] - ult["espesor"] <= incertidumbre(candidato) + incertidumbre(ult):
+        res["cr_adoptada"] = None
+        res["criterio"] = "Tendencia contradictoria o pérdida indistinguible de la incertidumbre declarada. Repetir UT comparable."
         if min(cand) < -0.05:
             res["avisos"].append("Aumento de espesor entre campañas: revisar error de medición, cambio de punto o reparación no registrada.")
     else:
@@ -106,11 +112,15 @@ def alert_thickness(t_adm: float, cr: float | None, plazo: float) -> float:
     return t_adm + (cr or 0.0) * plazo
 
 
-def analyze_tml(lecturas: list[dict], t_adm: float, plazo: float, corte=None) -> dict:
+def analyze_tml(lecturas: list[dict], t_adm: float, plazo: float, corte=None, exigir_incertidumbre=False) -> dict:
     serie, avisos = clean_series(lecturas, corte)
     seg, av2 = comparable_segment(serie)
     avisos += av2
     cr = corrosion_rates(seg)
+    problemas = [a for a in avisos if a.startswith("Fecha inválida") or "duplicada" in a or "unidad distinta" in a]
+    if problemas or (exigir_incertidumbre and any(r.get("incertidumbre_mm") is None for r in seg)):
+        cr["cr_adoptada"] = None
+        cr["criterio"] = "Revisar calidad de las lecturas y documentar incertidumbre antes de proyectar."
     avisos += cr["avisos"]
     out = {"serie_comparable": [{"fecha": r["fecha"], "espesor": r["espesor"]} for r in seg], "n_lecturas": len(serie), "avisos": avisos, **{k: cr[k] for k in ("cr_corto", "cr_largo", "cr_adoptada", "criterio")},
            "n_comparables": cr["n"], "t_med": None, "fecha_ult": None, "vr": None, "t_alerta": None, "bajo_minimo": False,
@@ -124,4 +134,9 @@ def analyze_tml(lecturas: list[dict], t_adm: float, plazo: float, corte=None) ->
         out["t_alerta"] = alert_thickness(t_adm, cr["cr_adoptada"], plazo)
         if out["bajo_minimo"]:
             avisos.append(f"Espesor medido {ult['espesor']:.2f} mm ≤ mínimo admisible {t_adm:.2f} mm.")
+    out["vr_desde_ut"] = out["vr"]
+    out["vr_al_corte"] = (max(0, out["vr"] - years_between(parse_date(out["fecha_ult"]), corte))
+                           if corte and out["vr"] is not None else out["vr"])
+    if seg and any(r.get("incertidumbre_mm") is None for r in seg):
+        avisos.append("Incertidumbre UT sin documentar: proyección académica condicional.")
     return out

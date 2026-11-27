@@ -14,6 +14,8 @@ def _design(p: dict) -> dict:
     elif fam == "recipiente":
         eq["diametro_int"] = float(p["diametro_int"])
     else:
+        if p.get("nivel_prueba") is not None:
+            eq["nivel_prueba"] = float(p["nivel_prueba"])
         eq.update(diametro=float(p["diametro"]), nivel_diseno=float(p["nivel_diseno"]), g_esp=float(p["g_esp"]),
                   cursos=[{"n": int(p["curso"]), "h_base": float(p["h_base"]), "altura": 2.4, "t_nominal": 0}])
     r = design.required_thickness(eq, int(p["curso"]) if fam == "tanque" else None)
