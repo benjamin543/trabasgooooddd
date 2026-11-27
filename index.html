@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cota UT · Gestión de integridad</title>
+  <link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/planta.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@pyscript/core@0.7.31/dist/core.css">
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@pyscript/core@0.7.31/dist/core.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><b>∿ Cota UT</b><span>Ingeniería de mantenimiento · MAN040-B</span></div>
+    <nav id="nav" aria-label="Navegación principal">
+      <a href="#/planta" data-r="planta">Planta</a>
+      <a href="#/panel" data-r="panel">Panel</a>
+      <a href="#/equipos" data-r="equipos">Equipos</a>
+      <a href="#/proyeccion" data-r="proyeccion">Proyección de vida</a>
+      <a href="#/calc" data-r="calc">Calculadora</a>
+      <a href="#/verif" data-r="verif">Verificación</a>
+      <a href="#/proyecto" data-r="proyecto">Respaldo</a>
+      <a href="#/acerca" data-r="acerca">Fundamentos</a>
+    </nav>
+  </header>
+  <div id="loading" class="loading">Cargando Python (Pyodide) en el navegador… la primera vez puede tardar unos segundos.</div>
+  <main id="app" hidden></main>
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- Núcleo de cálculo en Python (PyScript + Pyodide) -->
+  <script type="py" src="./main.py" config="./pyscript.toml"></script>
+  <script src="js/proyeccion.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
+

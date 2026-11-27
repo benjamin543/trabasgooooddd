@@ -1,0 +1,13 @@
+# Configuración de PyScript: el código de cálculo se copia al sistema de archivos virtual de Pyodide.
+# Sólo se usa la biblioteca estándar de Python (math, json, datetime, statistics no requiere instalación).
+[files]
+"./py/eqcalc/__init__.py" = "./eqcalc/__init__.py"
+"./py/eqcalc/materials.py" = "./eqcalc/materials.py"
+"./py/eqcalc/design.py" = "./eqcalc/design.py"
+"./py/eqcalc/corrosion.py" = "./eqcalc/corrosion.py"
+"./py/eqcalc/inspection.py" = "./eqcalc/inspection.py"
+"./py/eqcalc/rbi.py" = "./eqcalc/rbi.py"
+"./py/eqcalc/engine.py" = "./eqcalc/engine.py"
+"./py/eqcalc/verification.py" = "./eqcalc/verification.py"
+
+"./py/eqcalc/api.py" = "./eqcalc/api.py"
